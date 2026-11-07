@@ -248,7 +248,8 @@ Exit codes: `0` clean, `1` issues above threshold, `2` runtime error, `3` auth e
     "respectRobots": true,
     "includeSubdomains": false,
     "allowPrivateNetworks": false,
-    "allowFileUrls": false
+    "allowFileUrls": false,
+    "auditPages": true
   },
   "audit": {
     "profile": "ada",
@@ -313,9 +314,9 @@ Roughly 5–6 focused weeks for one developer.
 5. Desktop-only viewport for v1; mobile/responsive profiles later.
 6. No Docker image in v1; local Node install only.
 
-## 14. M0 implementation status
+## 14. Implementation status
 
-Implemented in this first pass:
+### M0 — done
 
 - TypeScript ESM package, strict config, Vitest
 - CLI: `scan`, `doctor`, `init`
@@ -329,7 +330,21 @@ Implemented in this first pass:
 - 40 unit tests covering URL normalization, target safety, config validation, and scoring
 - Verified: `pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm smoke`, `canopy doctor`, and CLI exit codes 0/1/2
 
-Next: M1 — same-origin crawler, SQLite storage, tree/graph UI.
+### M1 — done
+
+- `canopy crawl <url>` with BFS queue, `maxPages`, `maxDepth`, `concurrency`, and `requestsPerSecond`
+- Static-first link discovery from anchors, areas, same-origin iframes, GET form actions, sitemaps, and redirects
+- Same-origin scope by default (`includeSubdomains` opt-in), fragment stripping, tracking-param removal, sorted query params
+- `robots.txt` parsing (longest match wins, Allow ties, wildcards, `$` anchors, `Crawl-delay`, sitemaps) and enforcement
+- Redirect following with per-hop target-safety checks; destructive-looking routes skipped by default
+- Rendered audit of every HTML page through the shared `auditLoadedPage` path (same findings as `scan`)
+- Per-page artifacts under `pages/<slug>/`; crawl manifest, tree, graph, and self-contained `viewer.html`
+- SQLite storage at `<out>/canopy.db` with `runs`, `pages`, `edges`, `issues`, and `ignore_rules` tables
+- Self-contained viewer: searchable path tree, depth-layered SVG link graph, keyboard-operable nodes, per-page findings
+- 61 tests, including a 30-page fixture crawl (robots, depth, maxPages, redirects, SQLite, viewer) and a rendered-audit smoke test
+- Verified: `pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm smoke`, and `canopy crawl` against a local static server
+
+Next: M2 — scripted login, session-expiry handling, manual session capture, and shadow-DOM link extraction.
 
 ## 15. Prior art and community notes
 

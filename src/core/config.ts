@@ -36,6 +36,7 @@ export const CrawlConfigSchema = z
     includeSubdomains: z.boolean().default(false),
     allowPrivateNetworks: z.boolean().default(false),
     allowFileUrls: z.boolean().default(false),
+    auditPages: z.boolean().default(true),
   })
   .prefault({});
 

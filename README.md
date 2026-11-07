@@ -16,7 +16,14 @@ No source code from the target is read. No cloud service. No telemetry.
 - `doctor` the local browser setup
 - `init` a project config
 
-The crawler, tree/graph UI, scripted login, per-node ignore rules, and live simulation are the next milestones. See [PLANNER.md](./PLANNER.md).
+**M1 — crawl + tree is in place.** The CLI can also:
+
+- `crawl` a same-origin site with static-first discovery and rendered audits
+- respect `robots.txt`, sitemaps, redirects, depth/page limits, and a destructive-route denylist
+- build a path tree and a link graph, and write a self-contained `viewer.html`
+- store every run in a local SQLite database (`canopy.db`)
+
+Scripted login, a richer detail UI, per-node ignore rules, and live simulation are the next milestones. See [PLANNER.md](./PLANNER.md).
 
 ## Requirements
 
@@ -32,12 +39,14 @@ pnpm install
 pnpm exec playwright install chromium   # or rely on system Chrome
 pnpm doctor
 pnpm canopy scan https://example.com
+pnpm canopy crawl https://example.com     # whole same-origin site
 ```
 
 Run against a local app:
 
 ```bash
 pnpm canopy scan http://127.0.0.1:3000
+pnpm canopy crawl http://127.0.0.1:3000 --allow-private
 ```
 
 Run the built-in smoke test (uses the fixture site and system Chrome when available):
@@ -51,6 +60,8 @@ pnpm smoke
 ```bash
 pnpm canopy scan <url>          # scan one page
 pnpm canopy scan <url> --json   # machine-readable run manifest
+pnpm canopy crawl <url>         # crawl a same-origin site
+pnpm canopy crawl <url> --json  # machine-readable crawl manifest
 pnpm canopy doctor              # check Node + browser setup
 pnpm canopy init                # write canopy.config.json
 ```
@@ -71,6 +82,20 @@ Useful scan flags:
 --config canopy.config.json
 ```
 
+Crawl adds:
+
+```bash
+--max-pages 500
+--max-depth 5
+--concurrency 2
+--rps 1
+--no-audit          # map links only; skip rendered audits
+--ignore-robots     # only for sites you own
+--fail-on critical|serious|moderate|minor
+```
+
+`scan` shares the browser, timeout, viewport, output, and `--fail-on` flags.
+
 Exit codes: `0` clean, `1` issues at or above `--fail-on`, `2` runtime error, `3` auth expired (reserved), `4` cancelled.
 
 ## Configuration
@@ -87,7 +112,8 @@ Exit codes: `0` clean, `1` issues at or above `--fail-on`, `2` runtime error, `3
     "respectRobots": true,
     "includeSubdomains": false,
     "allowPrivateNetworks": false,
-    "allowFileUrls": false
+    "allowFileUrls": false,
+    "auditPages": true
   },
   "audit": {
     "profile": "ada",
@@ -121,6 +147,20 @@ keyboard.json    # tab order, focus state, findings
 page.html        # rendered DOM snapshot
 screenshot.png   # full-page screenshot
 ```
+
+Every crawl writes a run in the same place:
+
+```
+crawl.json       # crawl manifest: pages, edges, scores, notices
+tree.json        # path tree
+graph.json       # link-graph nodes and edges
+viewer.html      # self-contained offline tree + graph viewer
+pages/<slug>/    # per-page screenshot, DOM, axe, and keyboard artifacts
+```
+
+Crawl runs are also upserted into `<out>/canopy.db` (SQLite) with `runs`,
+`pages`, `edges`, `issues`, and `ignore_rules` tables. Open `viewer.html` in
+any browser — it has no external assets and works from `file://`.
 
 ## Safety
 

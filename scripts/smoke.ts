@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CanopyConfigSchema } from '../src/core/config.js';
+import { crawlSite } from '../src/core/crawl.js';
+import { listRuns, openDatabase } from '../src/core/db.js';
 import { scanPage } from '../src/core/scan.js';
 import { TOOL_VERSION } from '../src/core/version.js';
 
@@ -105,6 +107,52 @@ async function main(): Promise<void> {
 
     console.log(
       `smoke: ok — ${ruleIds.size} rules, ${manifest.page.keyboard.findings.length} keyboard findings, run ${runDir}`,
+    );
+
+    console.log(`smoke: crawling ${origin}/`);
+
+    const crawl = await crawlSite({
+      url: `${origin}/`,
+      config,
+      toolVersion: TOOL_VERSION,
+      audit: true,
+      onEvent: (message) => console.log(`smoke:   ${message}`),
+    });
+
+    const { manifest: site } = crawl;
+
+    if (site.stats.pages < 3) fail(`expected at least 3 crawled pages, got ${site.stats.pages}`);
+    if (site.stats.audited < 2) fail(`expected at least 2 audited pages, got ${site.stats.audited}`);
+    if (site.stats.errors > 0) fail(`crawl reported errors: ${site.stats.errors}`);
+    if (!site.pages.some((crawled) => crawled.url.endsWith('/about.html'))) {
+      fail('crawl did not visit about.html');
+    }
+    if (site.stats.externalLinks < 1) fail('crawl did not record external links');
+
+    for (const file of ['crawl.json', 'tree.json', 'graph.json', 'viewer.html']) {
+      await stat(join(crawl.runDir, file)).catch(() => fail(`missing crawl artifact ${file}`));
+    }
+
+    const viewer = await readFile(join(crawl.runDir, 'viewer.html'), 'utf8');
+    if (!viewer.includes('Canopy site report')) fail('viewer.html is missing its header');
+    if (!viewer.includes('Canopy Fixture')) fail('viewer.html is missing crawled page titles');
+
+    const database = openDatabase(join(outRoot, 'canopy.db'));
+    try {
+      const runs = listRuns(database);
+      if (!runs.some((run) => run.id === site.id)) fail('crawl run was not saved to SQLite');
+      const savedPages = database
+        .prepare('SELECT COUNT(*) AS count FROM pages WHERE run_id = ?')
+        .get(site.id) as { count: number };
+      if (savedPages.count !== site.stats.pages) {
+        fail(`SQLite has ${savedPages.count} pages, expected ${site.stats.pages}`);
+      }
+    } finally {
+      database.close();
+    }
+
+    console.log(
+      `smoke: crawl ok — ${site.stats.pages} pages (${site.stats.audited} audited), run ${crawl.runDir}`,
     );
     succeeded = true;
   } finally {

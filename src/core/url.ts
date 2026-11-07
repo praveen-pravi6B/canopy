@@ -45,6 +45,27 @@ export function normalizeUrl(input: string, base?: string): string {
   return url.toString();
 }
 
+export function isSameOrigin(candidate: URL, root: URL): boolean {
+  return candidate.origin === root.origin;
+}
+
+export function isInScope(candidate: URL, root: URL, includeSubdomains = false): boolean {
+  if (candidate.protocol !== root.protocol) return false;
+
+  const candidatePort = candidate.port || DEFAULT_PORTS[candidate.protocol] || '';
+  const rootPort = root.port || DEFAULT_PORTS[root.protocol] || '';
+  if (candidatePort !== rootPort) return false;
+
+  const candidateHost = candidate.hostname.toLowerCase();
+  const rootHost = root.hostname.toLowerCase();
+
+  if (candidateHost === rootHost) return true;
+  if (!includeSubdomains) return false;
+
+  // Avoid treating lookalikes such as evil-example.com as subdomains.
+  return candidateHost.endsWith(`.${rootHost}`);
+}
+
 export function parseTargetUrl(input: string): URL {
   const trimmed = input.trim();
   if (!trimmed) throw new Error('A target URL is required.');

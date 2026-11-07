@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { TOOL_VERSION } from '../core/version.js';
+import { registerCrawlCommand } from './commands/crawl.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerScanCommand } from './commands/scan.js';
@@ -13,6 +14,7 @@ program
   .version(TOOL_VERSION, '-v, --version');
 
 registerScanCommand(program);
+registerCrawlCommand(program);
 registerDoctorCommand(program);
 registerInitCommand(program);
 
