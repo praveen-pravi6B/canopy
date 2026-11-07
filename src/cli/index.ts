@@ -4,9 +4,11 @@ import { AuthError } from '../core/auth.js';
 import { TOOL_VERSION } from '../core/version.js';
 import { registerAuthCommand } from './commands/auth.js';
 import { registerCrawlCommand } from './commands/crawl.js';
+import { registerDiffCommand } from './commands/diff.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerIgnoreCommand } from './commands/ignore.js';
 import { registerInitCommand } from './commands/init.js';
+import { registerReportCommand } from './commands/report.js';
 import { registerScanCommand } from './commands/scan.js';
 import { registerSimulateCommand } from './commands/simulate.js';
 
@@ -22,6 +24,8 @@ registerCrawlCommand(program);
 registerAuthCommand(program);
 registerIgnoreCommand(program);
 registerSimulateCommand(program);
+registerReportCommand(program);
+registerDiffCommand(program);
 registerDoctorCommand(program);
 registerInitCommand(program);
 

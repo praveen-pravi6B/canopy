@@ -376,7 +376,15 @@ Roughly 5–6 focused weeks for one developer.
 
 **Not yet (M4 gaps / future):** interactive local API/UI for toggling ignores in the viewer; live browser control wired to a local web UI; SPA route re-audit after simulation navigation beyond MutationObserver patch reapply.
 
-Next: M5 — JSON/CSV/HTML export polish, run diff, baseline mode, packaging/docs, SECURITY/CONTRIBUTING/CI.
+### M5 — core done (report/diff/docs)
+
+- `report <manifest|run-dir>` exports JSON summaries, CSV findings, or a regenerated self-contained HTML viewer
+- `diff <before> <after>` compares crawl manifests (score/ADA/keyboard deltas, issue deltas, added/removed/changed pages, new/fixed rule IDs)
+- Added `SECURITY.md`, `CONTRIBUTING.md`, and a basic GitHub Actions CI workflow (typecheck, fast tests excluding slow browser suites, build)
+- 90 fast tests across 11 files (added export/diff tests)
+- Verified: `pnpm typecheck`, `pnpm vitest run test/export-diff.test.ts` and fast suites, `pnpm build`
+
+**Not yet (M5 gaps / future):** baseline mode, npm publish workflow/`npx` from registry (package remains `private`), full browser-suite CI, interactive local web UI/server, and extended packaging/release automation.
 
 ## 15. Prior art and community notes
 

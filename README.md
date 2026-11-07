@@ -44,7 +44,12 @@ No source code from the target is read. No cloud service. No telemetry.
 - auto-apply stored ignore rules to new crawl runs (scores/notices/viewer reflect active findings)
 - open a headed browser and apply reversible ADA/keyboard simulation with before/after screenshots (`simulate`)
 
-An interactive local API/UI for toggling ignores and a full React UI remain future work. See [PLANNER.md](./PLANNER.md).
+**M5 — reporting, diff, and project docs (core) is in place.** The CLI can also:
+
+- export crawl findings as JSON, CSV, or a self-contained HTML viewer (`report`)
+- compare two crawl runs for score/issue/rule/page changes (`diff`)
+
+See `SECURITY.md` and `CONTRIBUTING.md`. An interactive local web UI, npm publish flow, and extended CI/browser coverage remain future work. See [PLANNER.md](./PLANNER.md).
 
 ## Requirements
 
@@ -87,6 +92,8 @@ pnpm canopy ignore add "/legacy/*" --category ada --reason "third-party"
 pnpm canopy ignore list
 pnpm canopy ignore apply .canopy/runs/<id>/crawl.json
 pnpm canopy simulate https://example.com --mode both
+pnpm canopy report .canopy/runs/<id> --format csv --out findings.csv
+pnpm canopy diff .canopy/runs/<before> .canopy/runs/<after>
 pnpm canopy doctor
 pnpm canopy init
 ```
