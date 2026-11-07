@@ -365,7 +365,18 @@ Roughly 5–6 focused weeks for one developer.
 - 83 tests across 11 files (added axe tag/profile and viewer rendering regressions)
 - Verified: `pnpm typecheck`, `pnpm vitest run test/axe.test.ts test/viewer.test.ts` and fast suites, `pnpm build`
 
-Next: M4 — per-node ignore rules, a local detail API/UI workflow for ignores, and live simulation controls.
+### M4 — core done (ignore + simulation)
+
+- URL/path glob ignore rules stored in SQLite (`ignore_rules`) with categories `ada`/`keyboard`/`all` and required reasons
+- CLI: `ignore add/list/remove/apply`; `ignore apply` rewrites a crawl manifest/viewer with ignored findings excluded from active scores
+- Crawl auto-applies stored ignore rules and records notices; active scores/counts are recomputed from non-ignored findings
+- `simulate <url>` opens a headed browser, captures before/after screenshots, applies reversible ADA/keyboard patches (ARIA/focus stripping, Tab/key blocking, injected Restore button, MutationObserver reapply), and supports auth flags
+- 87 fast tests across 10 files (added ignore engine and DB CRUD tests)
+- Verified: `pnpm typecheck`, `pnpm vitest run --exclude auth-crawl.test.ts --exclude rendered.test.ts` (87/87), `pnpm build`
+
+**Not yet (M4 gaps / future):** interactive local API/UI for toggling ignores in the viewer; live browser control wired to a local web UI; SPA route re-audit after simulation navigation beyond MutationObserver patch reapply.
+
+Next: M5 — JSON/CSV/HTML export polish, run diff, baseline mode, packaging/docs, SECURITY/CONTRIBUTING/CI.
 
 ## 15. Prior art and community notes
 

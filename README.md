@@ -37,7 +37,14 @@ No source code from the target is read. No cloud service. No telemetry.
 - capture per-node bounding boxes and render screenshot highlights in `viewer.html`
 - inspect richer findings: rule source/tags, node HTML snippets, selectors, positions, and ADA/keyboard/overall scores
 
-Per-node ignore rules and live simulation are the next milestones. See [PLANNER.md](./PLANNER.md).
+**M4 — ignore rules and simulation (core) is in place.** The CLI can also:
+
+- manage per-node ignore rules in SQLite (`ignore add/list/remove`) by URL/path glob and category (`ada`, `keyboard`, `all`)
+- apply ignore rules to existing crawl manifests (`ignore apply`)
+- auto-apply stored ignore rules to new crawl runs (scores/notices/viewer reflect active findings)
+- open a headed browser and apply reversible ADA/keyboard simulation with before/after screenshots (`simulate`)
+
+An interactive local API/UI for toggling ignores and a full React UI remain future work. See [PLANNER.md](./PLANNER.md).
 
 ## Requirements
 
@@ -73,13 +80,15 @@ pnpm smoke
 
 ```bash
 pnpm canopy scan <url>          # scan one page
-pnpm canopy scan <url> --json   # machine-readable run manifest
 pnpm canopy crawl <url>         # crawl a same-origin site
-pnpm canopy crawl <url> --json  # machine-readable crawl manifest
-pnpm canopy auth test --recipe auth.yml      # run a login recipe, save session state
-pnpm canopy auth capture --url <login-url>   # log in manually, save session state
-pnpm canopy doctor              # check Node + browser setup
-pnpm canopy init                # write canopy.config.json
+pnpm canopy auth test --recipe auth.yml
+pnpm canopy auth capture --url <login-url>
+pnpm canopy ignore add "/legacy/*" --category ada --reason "third-party"
+pnpm canopy ignore list
+pnpm canopy ignore apply .canopy/runs/<id>/crawl.json
+pnpm canopy simulate https://example.com --mode both
+pnpm canopy doctor
+pnpm canopy init
 ```
 
 Useful scan flags:

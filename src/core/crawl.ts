@@ -5,7 +5,7 @@ import type { APIRequestContext, Page, Response } from 'playwright';
 import { auditLoadedPage, redactHeaders } from './audit.js';
 import { detectAuthExpiry } from './auth.js';
 import type { CanopyConfig } from './config.js';
-import { openDatabase, saveCrawlRun } from './db.js';
+import { listIgnoreRules, openDatabase, saveCrawlRun } from './db.js';
 import { extractDocument } from './html.js';
 import { extractRenderedLinks } from './rendered.js';
 import {
@@ -16,6 +16,7 @@ import {
   type RobotsRules,
 } from './robots.js';
 import { countIssues, overallScore } from './score.js';
+import { applyIgnoreRulesToManifest } from './ignore.js';
 import { openSession, type AuthSession } from './session.js';
 import { createRunDirectory, writeJson, writeText } from './storage.js';
 import { buildSiteGraph, buildSiteTree } from './tree.js';
@@ -725,7 +726,7 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
     maxDepthReached: pages.reduce((max, page) => Math.max(max, page.depth), 0),
   };
 
-  const manifest: CrawlManifest = {
+  let manifest: CrawlManifest = {
     schemaVersion: 1,
     id: run.id,
     toolVersion: options.toolVersion,
@@ -760,21 +761,28 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
 
   try {
     database = openDatabase(databasePath);
+    const rules = listIgnoreRules(database);
+    if (rules.length > 0) {
+      const applied = applyIgnoreRulesToManifest(manifest, rules);
+      manifest = applied.value;
+      manifest.tree = buildSiteTree(rootUrl, manifest.pages);
+      manifest.graph = buildSiteGraph(rootUrl, manifest.pages, manifest.edges);
+    }
     saveCrawlRun(database, manifest);
   } catch (error) {
-    notices.push(
+    manifest.notices.push(
       `SQLite storage unavailable: ${error instanceof Error ? error.message : String(error)}`,
     );
   } finally {
     database?.close();
   }
 
-  manifest.notices = [...new Set(notices)];
+  manifest.notices = [...new Set(manifest.notices)];
 
   const manifestPath = join(run.dir, 'crawl.json');
   await writeJson(manifestPath, manifest);
-  await writeJson(join(run.dir, 'tree.json'), tree);
-  await writeJson(join(run.dir, 'graph.json'), graph);
+  await writeJson(join(run.dir, 'tree.json'), manifest.tree);
+  await writeJson(join(run.dir, 'graph.json'), manifest.graph);
   await writeText(join(run.dir, 'viewer.html'), renderViewer(manifest));
 
   return { manifest, runDir: run.dir, manifestPath, authExpired };
