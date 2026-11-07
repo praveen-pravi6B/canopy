@@ -23,7 +23,14 @@ No source code from the target is read. No cloud service. No telemetry.
 - build a path tree and a link graph, and write a self-contained `viewer.html`
 - store every run in a local SQLite database (`canopy.db`)
 
-Scripted login, a richer detail UI, per-node ignore rules, and live simulation are the next milestones. See [PLANNER.md](./PLANNER.md).
+**M2 — auth + rendered discovery is in place.** The CLI can also:
+
+- run a scripted login recipe (YAML/JSON) and save a `0600` Playwright session state
+- capture a session manually for MFA/captcha (`canopy auth capture`)
+- crawl authenticated same-origin pages and stop with exit code `3` if the session expires
+- discover links inside open and nested shadow roots during rendered audits
+
+A richer detail UI, per-node ignore rules, and live simulation are the next milestones. See [PLANNER.md](./PLANNER.md).
 
 ## Requirements
 
@@ -62,6 +69,8 @@ pnpm canopy scan <url>          # scan one page
 pnpm canopy scan <url> --json   # machine-readable run manifest
 pnpm canopy crawl <url>         # crawl a same-origin site
 pnpm canopy crawl <url> --json  # machine-readable crawl manifest
+pnpm canopy auth test --recipe auth.yml      # run a login recipe, save session state
+pnpm canopy auth capture --url <login-url>   # log in manually, save session state
 pnpm canopy doctor              # check Node + browser setup
 pnpm canopy init                # write canopy.config.json
 ```
@@ -94,9 +103,18 @@ Crawl adds:
 --fail-on critical|serious|moderate|minor
 ```
 
-`scan` shares the browser, timeout, viewport, output, and `--fail-on` flags.
+Authentication (scan/crawl):
 
-Exit codes: `0` clean, `1` issues at or above `--fail-on`, `2` runtime error, `3` auth expired (reserved), `4` cancelled.
+```bash
+--auth auth.yml           # scripted login recipe (YAML or JSON)
+--auth-state session.json # reuse a saved Playwright storage state
+--auth-login-url <url>    # login URL used to detect an expired session
+```
+
+`scan` and `crawl` share browser, timeout, viewport, output, auth, and
+`--fail-on` flags where applicable.
+
+Exit codes: `0` clean, `1` issues at or above `--fail-on`, `2` runtime error, `3` auth expired, `4` cancelled.
 
 ## Configuration
 
@@ -132,8 +150,27 @@ Exit codes: `0` clean, `1` issues at or above `--fail-on`, `2` runtime error, `3
     "dir": ".canopy",
     "screenshots": true,
     "domSnapshots": true
+  },
+  "auth": {
+    "recipe": null,
+    "statePath": null,
+    "loginUrl": null
   }
 }
+```
+
+An auth recipe resolves `${ENV_VAR}` placeholders at run time and never stores
+secrets in the recipe:
+
+```yaml
+login:
+  url: https://example.com/login
+  steps:
+    - fill: { selector: "#email", value: "${CANOPY_USER}" }
+    - fill: { selector: "#password", value: "${CANOPY_PASS}" }
+    - click: { selector: "button[type=submit]" }
+  success:
+    waitForUrl: /dashboard
 ```
 
 ## Run artifacts
@@ -169,6 +206,7 @@ any browser — it has no external assets and works from `file://`.
 - Private-network targets require `--allow-private`; loopback is allowed for local development.
 - Redirects are re-checked against the same target-safety rules.
 - Cookies and authorization headers are redacted from stored headers.
+- Auth recipes read secrets from environment variables at run time; saved session state is written with `0600` permissions.
 - No telemetry, no external assets, no cloud calls.
 
 Only scan sites you own or are authorized to test. Automated findings are indicators, not legal ADA certification.

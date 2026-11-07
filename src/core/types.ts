@@ -181,6 +181,12 @@ export interface CrawlManifest {
   finishedAt: string;
   durationMs: number;
   config: unknown;
+  auth: {
+    enabled: boolean;
+    loginUrl: string | null;
+    statePath: string | null;
+    expired: boolean;
+  };
   stats: CrawlStats;
   summary: {
     adaScore: number;

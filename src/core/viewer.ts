@@ -19,6 +19,7 @@ interface ViewerData {
   generatedAt: string;
   summary: CrawlManifest['summary'];
   stats: CrawlManifest['stats'];
+  auth: CrawlManifest['auth'];
   pages: ViewerPage[];
   tree: CrawlManifest['tree'];
   graph: CrawlManifest['graph'];
@@ -41,6 +42,7 @@ function toViewerData(manifest: CrawlManifest): ViewerData {
     generatedAt: manifest.finishedAt,
     summary: manifest.summary,
     stats: manifest.stats,
+    auth: manifest.auth,
     pages: manifest.pages.map((page) => ({
       url: page.url,
       title: page.title,
@@ -106,6 +108,9 @@ const CLIENT_JS = String.raw`
       ['Keyboard', data.summary.keyboardScore + '/100'],
       ['Errors', data.stats.errors]
     ];
+    if (data.auth && data.auth.enabled) {
+      chips.push(['Auth', data.auth.expired ? 'expired' : 'session']);
+    }
     chips.forEach(function (pair) {
       var chip = el('span', 'chip');
       chip.appendChild(el('strong', null, pair[1]));

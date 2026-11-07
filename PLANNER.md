@@ -344,7 +344,19 @@ Roughly 5–6 focused weeks for one developer.
 - 61 tests, including a 30-page fixture crawl (robots, depth, maxPages, redirects, SQLite, viewer) and a rendered-audit smoke test
 - Verified: `pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm smoke`, and `canopy crawl` against a local static server
 
-Next: M2 — scripted login, session-expiry handling, manual session capture, and shadow-DOM link extraction.
+### M2 — done
+
+- Scripted login recipes (YAML/JSON) with `${ENV_VAR}` interpolation, `fill`/`click`/`press`/`waitFor`/`goto`/`delay` steps, and a configurable success condition
+- `canopy auth test --recipe auth.yml` logs in and saves a Playwright session state with `0600` permissions
+- `canopy auth capture --url ...` opens a headed browser for manual login (MFA/captcha), then saves session state
+- `scan` and `crawl` accept `--auth`, `--auth-state`, and `--auth-login-url`; authenticated crawls reuse the session and use the same-origin request context for static fetches
+- Session-expiry detection (redirect to login / 401 / 403) stops the run and returns exit code `3` instead of auditing the login page as content
+- Rendered link discovery walks open and nested shadow roots during browser audits and merges results into crawl discovery
+- Crawl manifests record `auth { enabled, loginUrl, statePath, expired }`; the viewer shows an auth chip when enabled
+- 76 tests across 9 files, including scripted-login crawl and shadow-DOM discovery fixtures
+- Verified individually: `pnpm typecheck`, targeted vitest suites, `pnpm build`, `pnpm smoke`, and CLI help for `auth test`/`auth capture`
+
+Next: M3 — richer detail UI, axe profile controls, screenshot highlights, and focused per-page inspection.
 
 ## 15. Prior art and community notes
 

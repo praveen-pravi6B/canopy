@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { Browser, BrowserContext, Page, Response } from 'playwright';
+import type { APIRequestContext, Page, Response } from 'playwright';
 import { auditLoadedPage, redactHeaders } from './audit.js';
-import { launchBrowser } from './browser.js';
+import { detectAuthExpiry } from './auth.js';
 import type { CanopyConfig } from './config.js';
 import { openDatabase, saveCrawlRun } from './db.js';
 import { extractDocument } from './html.js';
+import { extractRenderedLinks } from './rendered.js';
 import {
   ALLOW_ALL,
   extractSitemapUrls,
@@ -15,6 +16,7 @@ import {
   type RobotsRules,
 } from './robots.js';
 import { countIssues, overallScore } from './score.js';
+import { openSession, type AuthSession } from './session.js';
 import { createRunDirectory, writeJson, writeText } from './storage.js';
 import { buildSiteGraph, buildSiteTree } from './tree.js';
 import type {
@@ -27,10 +29,11 @@ import type {
   SiteTreeNode,
 } from './types.js';
 import { assertSafeTarget, isInScope, normalizeUrl, parseTargetUrl } from './url.js';
+import { USER_AGENT } from './version.js';
 import { renderViewer } from './viewer.js';
 
-const USER_AGENT = 'CanopyBot/0.1 (+https://github.com/praveen-pravi6B/canopy)';
 const DESTRUCTIVE_PATTERN = /(logout|log-out|signout|sign-out|delete|destroy|deactivate|unsubscribe)/i;
+const AUTH_EXPIRED_MESSAGE = 'Authentication expired. Re-run with a fresh session or auth recipe.';
 const MAX_REDIRECTS = 5;
 const MAX_HTML_BYTES = 5 * 1024 * 1024;
 
@@ -82,11 +85,6 @@ interface DiscoveryResult {
   external: string[];
 }
 
-interface AuditContext {
-  browser: Browser;
-  context: BrowserContext;
-}
-
 export interface CrawlOptions {
   url: string;
   config: CanopyConfig;
@@ -100,6 +98,7 @@ export interface CrawlResult {
   manifest: CrawlManifest;
   runDir: string;
   manifestPath: string;
+  authExpired: boolean;
 }
 
 function isRedirect(status: number): boolean {
@@ -202,6 +201,84 @@ async function fetchStatic(
   return { ok: false, error: 'Too many redirects' };
 }
 
+async function fetchStaticWithRequest(
+  request: APIRequestContext,
+  startUrl: string,
+  root: URL,
+  config: CanopyConfig,
+): Promise<StaticPage | StaticFailure> {
+  let current = new URL(startUrl);
+
+  try {
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+      await assertSafeTarget(current, { allowPrivate: config.crawl.allowPrivateNetworks });
+
+      if (!isInScope(current, root, config.crawl.includeSubdomains)) {
+        return {
+          ok: true,
+          finalUrl: current.toString(),
+          status: 0,
+          headers: {},
+          contentType: '',
+          body: null,
+          outOfScope: true,
+        };
+      }
+
+      const response = await request.get(current.toString(), {
+        failOnStatusCode: false,
+        maxRedirects: 0,
+        timeout: config.browser.timeoutMs,
+        headers: {
+          'user-agent': USER_AGENT,
+          accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5',
+        },
+      });
+
+      const status = response.status();
+      const headers = response.headers();
+      const finalUrl = response.url();
+
+      if (isRedirect(status)) {
+        const location = headers['location'];
+        await response.dispose();
+
+        if (!location) return { ok: false, error: `Redirect without a Location header: ${status}` };
+        if (hop === MAX_REDIRECTS) return { ok: false, error: 'Too many redirects' };
+
+        current = new URL(location, current);
+        continue;
+      }
+
+      const contentType = headers['content-type'] ?? '';
+      let body: string | null = null;
+
+      if (isHtmlContentType(contentType)) {
+        body = (await response.body()).toString('utf8').slice(0, MAX_HTML_BYTES);
+      }
+
+      await response.dispose();
+
+      return {
+        ok: true,
+        finalUrl,
+        status,
+        headers,
+        contentType,
+        body,
+        outOfScope: false,
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  return { ok: false, error: 'Too many redirects' };
+}
+
 function artifactSlug(url: string): string {
   const parsed = new URL(url);
   const base =
@@ -240,8 +317,21 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
 
   let blockedByRobots = 0;
   let skippedDestructive = 0;
-  const auditState: { promise: Promise<AuditContext> | null } = { promise: null };
+  let authExpired = false;
+  const sessionState: { promise: Promise<AuthSession> | null; session: AuthSession | null } = {
+    promise: null,
+    session: null,
+  };
   let robots: RobotsRules = ALLOW_ALL;
+
+  const authEnabled = Boolean(config.auth.recipe || config.auth.statePath);
+
+  const checkExpiry = (finalUrl: string, status: number | null): boolean => {
+    if (!sessionState.session?.loginUrl) return false;
+    if (!detectAuthExpiry(finalUrl, status, sessionState.session.loginUrl)) return false;
+    authExpired = true;
+    return true;
+  };
 
   const addEdge = (from: string, to: string, external: boolean): void => {
     const key = `${from}\u0000${to}`;
@@ -316,31 +406,34 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
   const maxInterval = 1000 / Math.max(config.crawl.requestsPerSecond, 0.1);
   const limiter = new RateLimiter(Math.max(maxInterval, robots.crawlDelayMs ?? 0));
 
-  const getAuditContext = (): Promise<AuditContext> => {
-    auditState.promise ??= (async () => {
+  const getSession = (): Promise<AuthSession> => {
+    sessionState.promise ??= (async () => {
       options.onEvent?.('Launching browser for rendered audits');
-      const launched = await launchBrowser(config);
-      const context = await launched.browser.newContext({
-        viewport: config.browser.viewport,
-        ignoreHTTPSErrors: config.browser.ignoreHTTPSErrors,
-        acceptDownloads: false,
-        userAgent: USER_AGENT,
+      const session = await openSession({
+        config,
+        ...(options.onEvent ? { onEvent: options.onEvent } : {}),
       });
-
-      return { browser: launched.browser, context };
+      sessionState.session = session;
+      return session;
     })();
 
-    return auditState.promise;
+    return sessionState.promise;
   };
+
+  if (authEnabled) {
+    const session = await getSession();
+    if (session.loginUrl) notices.push('Authenticated crawl: scripted login is active.');
+  }
 
   const auditWithBrowser = async (
     item: QueueItem,
     page: CrawledPage,
     pageStartedMs: number,
-  ): Promise<void> => {
+  ): Promise<{ links: string[]; external: string[] }> => {
+    const rendered: { links: string[]; external: string[] } = { links: [], external: [] };
     options.onEvent?.(`Auditing ${item.url}`);
-    const auditContext = await getAuditContext();
-    const tab = await auditContext.context.newPage();
+    const session = await getSession();
+    const tab = await session.context.newPage();
 
     try {
       tab.on('dialog', (dialog) => {
@@ -357,7 +450,7 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
         });
       } catch (error) {
         page.error = error instanceof Error ? error.message : String(error);
-        return;
+        return rendered;
       }
 
       await tab
@@ -367,6 +460,11 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
         .catch(() => undefined);
       await tab.waitForTimeout(config.browser.settleMs);
 
+      if (checkExpiry(tab.url(), response?.status() ?? null)) {
+        page.error = AUTH_EXPIRED_MESSAGE;
+        return rendered;
+      }
+
       const finalUrl = new URL(tab.url());
       await assertSafeTarget(finalUrl, {
         allowPrivate: config.crawl.allowPrivateNetworks,
@@ -374,7 +472,17 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
 
       if (!isInScope(finalUrl, root, config.crawl.includeSubdomains)) {
         page.error = `Redirected outside the crawl scope: ${finalUrl.toString()}`;
-        return;
+        return rendered;
+      }
+
+      try {
+        for (const link of await extractRenderedLinks(tab)) {
+          const url = new URL(link);
+          if (isInScope(url, root, config.crawl.includeSubdomains)) rendered.links.push(link);
+          else rendered.external.push(link);
+        }
+      } catch {
+        // Rendered link discovery is best-effort; the static pass already ran.
       }
 
       const artifactDir = join(run.dir, 'pages', artifactSlug(item.url));
@@ -402,6 +510,8 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
       page.scores = audit.scores;
       page.issueCounts = countIssues(audit.issues);
       page.artifacts = audit.artifacts;
+
+      return rendered;
     } finally {
       await tab.close().catch(() => undefined);
     }
@@ -435,7 +545,10 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
 
     try {
       await limiter.wait();
-      const fetched = await fetchStatic(item.url, root, config, options.signal);
+      const fetched =
+        authEnabled && sessionState.session
+          ? await fetchStaticWithRequest(sessionState.session.context.request, item.url, root, config)
+          : await fetchStatic(item.url, root, config, options.signal);
 
       if (!fetched.ok) {
         page.error = fetched.error;
@@ -445,7 +558,9 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
         page.contentType = fetched.contentType;
         page.headers = redactHeaders(fetched.headers);
 
-        if (fetched.outOfScope) {
+        if (checkExpiry(fetched.finalUrl, fetched.status)) {
+          page.error = AUTH_EXPIRED_MESSAGE;
+        } else if (fetched.outOfScope) {
           page.error = `Redirected outside the crawl scope: ${fetched.finalUrl}`;
           addEdge(item.url, fetched.finalUrl, true);
         } else if (fetched.body !== null) {
@@ -468,12 +583,23 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
         }
 
         if (
+          !authExpired &&
           auditEnabled &&
           fetched.body !== null &&
           fetched.status >= 200 &&
           fetched.status < 400
         ) {
-          await auditWithBrowser(item, page, pageStartedMs);
+          const rendered = await auditWithBrowser(item, page, pageStartedMs);
+
+          for (const link of rendered.links) {
+            if (!page.links.includes(link)) page.links.push(link);
+            discovered.push({ url: link, depth: item.depth + 1 });
+          }
+
+          for (const link of rendered.external) {
+            if (!page.externalLinks.includes(link)) page.externalLinks.push(link);
+            external.push(link);
+          }
         }
       }
     } catch (error) {
@@ -516,7 +642,7 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
     }
   }
 
-  while (queue.length > 0 && pages.length < config.crawl.maxPages) {
+  while (queue.length > 0 && pages.length < config.crawl.maxPages && !authExpired) {
     if (options.signal?.aborted) {
       notices.push('Crawl cancelled.');
       break;
@@ -552,11 +678,11 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
     }
   }
 
-  if (auditState.promise) {
-    const context = await auditState.promise.catch(() => null);
-    if (context) {
-      await context.context.close().catch(() => undefined);
-      await context.browser.close().catch(() => undefined);
+  if (sessionState.promise) {
+    const session = await sessionState.promise.catch(() => null);
+    if (session) {
+      await session.context.close().catch(() => undefined);
+      await session.browser.close().catch(() => undefined);
     }
   }
 
@@ -583,6 +709,10 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
     notices.push(`Depth limit reached at ${config.crawl.maxDepth}.`);
   }
 
+  if (authExpired) {
+    notices.push('Authentication expired; the crawl stopped before auditing the login page.');
+  }
+
   const tree: SiteTreeNode = buildSiteTree(rootUrl, pages);
   const graph: SiteGraph = buildSiteGraph(rootUrl, pages, edges);
   const stats: CrawlStats = {
@@ -604,6 +734,12 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
     finishedAt: new Date(finishedMs).toISOString(),
     durationMs: finishedMs - startedMs,
     config,
+    auth: {
+      enabled: authEnabled,
+      loginUrl: sessionState.session?.loginUrl ?? config.auth.loginUrl ?? null,
+      statePath: sessionState.session?.statePath ?? config.auth.statePath ?? null,
+      expired: authExpired,
+    },
     stats,
     summary: {
       adaScore,
@@ -641,5 +777,5 @@ export async function crawlSite(options: CrawlOptions): Promise<CrawlResult> {
   await writeJson(join(run.dir, 'graph.json'), graph);
   await writeText(join(run.dir, 'viewer.html'), renderViewer(manifest));
 
-  return { manifest, runDir: run.dir, manifestPath };
+  return { manifest, runDir: run.dir, manifestPath, authExpired };
 }

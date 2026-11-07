@@ -1,10 +1,11 @@
 import { join } from 'node:path';
-import type { Browser, BrowserContext } from 'playwright';
+import type { BrowserContext, Page } from 'playwright';
 import { auditLoadedPage } from './audit.js';
-import { launchBrowser } from './browser.js';
+import { AuthError, detectAuthExpiry } from './auth.js';
 import type { CanopyConfig } from './config.js';
 import { emptyKeyboardResult } from './keyboard.js';
 import { countIssues } from './score.js';
+import { openSession, type AuthSession } from './session.js';
 import { createRunDirectory, writeJson } from './storage.js';
 import type { PageScanResult, RunManifest } from './types.js';
 import { assertSafeTarget, parseTargetUrl } from './url.js';
@@ -33,22 +34,16 @@ export async function scanPage(options: ScanPageOptions): Promise<ScanPageResult
   const run = await createRunDirectory(options.config.output.dir, target.toString());
   const manifestPath = join(run.dir, 'summary.json');
 
-  let browser: Browser | undefined;
-  let context: BrowserContext | undefined;
+  let session: AuthSession | undefined;
 
   try {
-    options.onEvent?.('Launching browser');
-    const launched = await launchBrowser(options.config);
-    browser = launched.browser;
-
-    context = await browser.newContext({
-      viewport: options.config.browser.viewport,
-      ignoreHTTPSErrors: options.config.browser.ignoreHTTPSErrors,
-      acceptDownloads: false,
-      userAgent: 'CanopyBot/0.1',
+    session = await openSession({
+      config: options.config,
+      ...(options.onEvent ? { onEvent: options.onEvent } : {}),
     });
 
-    const page = await context.newPage();
+    const context: BrowserContext = session.context;
+    const page: Page = await context.newPage();
     page.on('dialog', (dialog) => {
       void dialog.dismiss();
     });
@@ -72,6 +67,10 @@ export async function scanPage(options: ScanPageOptions): Promise<ScanPageResult
     await assertSafeTarget(new URL(finalUrl), {
       allowPrivate: options.config.crawl.allowPrivateNetworks,
     });
+
+    if (detectAuthExpiry(finalUrl, response?.status() ?? null, session.loginUrl)) {
+      throw new AuthError('Authentication expired before the page could be audited.');
+    }
 
     const pageResult = await auditLoadedPage({
       page,
@@ -104,6 +103,9 @@ export async function scanPage(options: ScanPageOptions): Promise<ScanPageResult
 
     return { manifest, runDir: run.dir, manifestPath };
   } catch (error) {
+    // Auth failures are actionable by the caller: map them to exit code 3.
+    if (error instanceof AuthError) throw error;
+
     const message = error instanceof Error ? error.message : String(error);
     const finishedMs = Date.now();
 
@@ -146,7 +148,9 @@ export async function scanPage(options: ScanPageOptions): Promise<ScanPageResult
 
     return { manifest, runDir: run.dir, manifestPath };
   } finally {
-    if (context) await context.close().catch(() => undefined);
-    if (browser) await browser.close().catch(() => undefined);
+    if (session) {
+      await session.context.close().catch(() => undefined);
+      await session.browser.close().catch(() => undefined);
+    }
   }
 }

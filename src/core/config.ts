@@ -48,12 +48,21 @@ export const OutputConfigSchema = z
   })
   .prefault({});
 
+export const AuthConfigSchema = z
+  .object({
+    recipe: z.string().min(1).nullable().default(null),
+    statePath: z.string().min(1).nullable().default(null),
+    loginUrl: z.string().min(1).nullable().default(null),
+  })
+  .prefault({});
+
 export const CanopyConfigSchema = z
   .object({
     crawl: CrawlConfigSchema,
     audit: AuditConfigSchema,
     browser: BrowserConfigSchema,
     output: OutputConfigSchema,
+    auth: AuthConfigSchema,
   })
   .prefault({});
 

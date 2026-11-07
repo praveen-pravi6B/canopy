@@ -16,6 +16,9 @@ export interface CommonCliOptions {
   allowPrivate?: boolean;
   screenshot?: boolean;
   dom?: boolean;
+  auth?: string;
+  authState?: string;
+  authLoginUrl?: string;
 }
 
 export function applyCommonOptions(config: CanopyConfig, options: CommonCliOptions): void {
@@ -42,6 +45,9 @@ export function applyCommonOptions(config: CanopyConfig, options: CommonCliOptio
   if (options.allowPrivate) config.crawl.allowPrivateNetworks = true;
   if (options.screenshot === false) config.output.screenshots = false;
   if (options.dom === false) config.output.domSnapshots = false;
+  if (options.auth) config.auth.recipe = options.auth;
+  if (options.authState) config.auth.statePath = options.authState;
+  if (options.authLoginUrl) config.auth.loginUrl = options.authLoginUrl;
 }
 
 export function parseViewport(value: string): { width: number; height: number } {

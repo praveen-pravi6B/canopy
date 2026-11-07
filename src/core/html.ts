@@ -9,8 +9,7 @@ export interface ExtractedDocument {
 
 const SKIP_SCHEMES = /^(mailto|tel|sms|javascript|data|blob|about):/i;
 
-function resolveLink(raw: string | undefined | null, baseUrl: string): string | null {
-  if (!raw) return null;
+export function resolveLink(raw: string | undefined | null, baseUrl: string): string | null {  if (!raw) return null;
 
   const href = raw.trim();
   if (!href || href === '#' || SKIP_SCHEMES.test(href)) return null;

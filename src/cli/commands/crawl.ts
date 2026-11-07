@@ -44,6 +44,9 @@ export function registerCrawlCommand(program: Command): void {
     .option('--allow-private', 'allow private-network targets')
     .option('--no-screenshot', 'skip screenshots')
     .option('--no-dom', 'skip DOM snapshots')
+    .option('--auth <path>', 'scripted login recipe (YAML or JSON)')
+    .option('--auth-state <path>', 'reuse a saved Playwright storage state')
+    .option('--auth-login-url <url>', 'login URL used to detect an expired session')
     .option('--no-audit', 'crawl structure only; skip rendered accessibility audits')
     .option('--max-pages <n>', 'maximum pages to crawl')
     .option('--max-depth <n>', 'maximum link depth')
@@ -79,7 +82,7 @@ export function registerCrawlCommand(program: Command): void {
         if (!options.quiet && !options.json) console.log(pc.dim(`  ${message}`));
       };
 
-      const { manifest, runDir } = await crawlSite({
+      const result = await crawlSite({
         url,
         config,
         toolVersion: TOOL_VERSION,
@@ -87,10 +90,17 @@ export function registerCrawlCommand(program: Command): void {
         onEvent,
       });
 
+      const { manifest, runDir } = result;
+
       if (options.json) {
         console.log(JSON.stringify(manifest, null, 2));
       } else {
         printCrawlSummary(manifest, runDir);
+      }
+
+      if (result.authExpired) {
+        process.exitCode = 3;
+        return;
       }
 
       if (manifest.stats.pages === 0 || manifest.stats.errors === manifest.stats.pages) {
@@ -118,6 +128,15 @@ function printCrawlSummary(manifest: CrawlManifest, runDir: string): void {
   console.log(`  ADA       ${formatScore(manifest.summary.adaScore)}`);
   console.log(`  Keyboard  ${formatScore(manifest.summary.keyboardScore)}`);
   console.log(`  Issues    ${formatCounts(manifest.summary.issueCounts)}`);
+
+  if (manifest.auth.enabled) {
+    console.log(
+      `  Auth      ${manifest.auth.expired ? pc.red('expired') : 'authenticated'}${
+        manifest.auth.statePath ? pc.dim(` · ${manifest.auth.statePath}`) : ''
+      }`,
+    );
+  }
+
   console.log(`  Viewer    ${runDir}/viewer.html`);
   console.log(`  Run       ${runDir}`);
 

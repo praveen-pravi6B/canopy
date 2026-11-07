@@ -37,6 +37,9 @@ export function registerScanCommand(program: Command): void {
     .option('--allow-private', 'allow private-network targets')
     .option('--no-screenshot', 'skip screenshots')
     .option('--no-dom', 'skip DOM snapshots')
+    .option('--auth <path>', 'scripted login recipe (YAML or JSON)')
+    .option('--auth-state <path>', 'reuse a saved Playwright storage state')
+    .option('--auth-login-url <url>', 'login URL used to detect an expired session')
     .option('--fail-on <impact>', 'exit 1 on issues at or above this impact', 'none')
     .action(async (url: string, options: ScanCliOptions) => {
       const { config } = loadConfig(options.config);

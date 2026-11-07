@@ -12,3 +12,5 @@ function readVersion(): string {
 }
 
 export const TOOL_VERSION = readVersion();
+
+export const USER_AGENT = 'CanopyBot/0.1 (+https://github.com/praveen-pravi6B/canopy)';
