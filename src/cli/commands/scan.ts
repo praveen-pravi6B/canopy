@@ -40,6 +40,10 @@ export function registerScanCommand(program: Command): void {
     .option('--auth <path>', 'scripted login recipe (YAML or JSON)')
     .option('--auth-state <path>', 'reuse a saved Playwright storage state')
     .option('--auth-login-url <url>', 'login URL used to detect an expired session')
+    .option('--profile <name>', 'audit profile: ada, wcag22aa, or best-practice')
+    .option('--best-practices', 'include best-practice rules')
+    .option('--no-best-practices', 'exclude best-practice rules')
+    .option('--max-tabs <n>', 'maximum Tab presses for the keyboard probe')
     .option('--fail-on <impact>', 'exit 1 on issues at or above this impact', 'none')
     .action(async (url: string, options: ScanCliOptions) => {
       const { config } = loadConfig(options.config);

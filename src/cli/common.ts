@@ -6,6 +6,8 @@ import type { Impact, Issue } from '../core/types.js';
 const BROWSERS = new Set(['chromium', 'chrome', 'msedge']);
 const FAIL_ON = new Set(['none', 'minor', 'moderate', 'serious', 'critical']);
 
+const PROFILES = new Set(['ada', 'wcag22aa', 'best-practice']);
+
 export interface CommonCliOptions {
   browser?: string;
   headed?: boolean;
@@ -19,6 +21,9 @@ export interface CommonCliOptions {
   auth?: string;
   authState?: string;
   authLoginUrl?: string;
+  profile?: string;
+  bestPractices?: boolean;
+  maxTabs?: string;
 }
 
 export function applyCommonOptions(config: CanopyConfig, options: CommonCliOptions): void {
@@ -48,6 +53,14 @@ export function applyCommonOptions(config: CanopyConfig, options: CommonCliOptio
   if (options.auth) config.auth.recipe = options.auth;
   if (options.authState) config.auth.statePath = options.authState;
   if (options.authLoginUrl) config.auth.loginUrl = options.authLoginUrl;
+  if (options.profile) {
+    if (!PROFILES.has(options.profile)) {
+      throw new Error('--profile must be ada, wcag22aa, or best-practice.');
+    }
+    config.audit.profile = options.profile as CanopyConfig['audit']['profile'];
+  }
+  if (options.bestPractices !== undefined) config.audit.includeBestPractices = options.bestPractices;
+  if (options.maxTabs) config.audit.maxTabs = parsePositiveInteger(options.maxTabs, '--max-tabs', 1000);
 }
 
 export function parseViewport(value: string): { width: number; height: number } {

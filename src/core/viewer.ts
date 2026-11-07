@@ -7,7 +7,10 @@ interface ViewerPage {
   depth: number;
   audited: boolean;
   score: number | null;
+  scores?: { ada: number; keyboard: number; overall: number };
   issueCount: number;
+  issueCounts?: { critical: number; serious: number; moderate: number; minor: number };
+  keyboardFindings?: number;
   issues: Issue[];
   screenshot?: string;
   dom?: string;
@@ -26,14 +29,6 @@ interface ViewerData {
   notices: string[];
 }
 
-function escapeHtml(value: string): string {
-  return value.replace(
-    /[&<>"']/g,
-    (character) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ??
-      character,
-  );
-}
 
 function toViewerData(manifest: CrawlManifest): ViewerData {
   return {
@@ -50,7 +45,10 @@ function toViewerData(manifest: CrawlManifest): ViewerData {
       depth: page.depth,
       audited: page.audited,
       score: page.audited ? page.scores.overall : null,
+      ...(page.audited ? { scores: page.scores } : {}),
       issueCount: page.issues.length,
+      ...(page.audited ? { issueCounts: page.issueCounts } : {}),
+      ...(page.audited ? { keyboardFindings: page.keyboardFindings } : {}),
       issues: page.issues,
       ...(page.artifacts.screenshot ? { screenshot: page.artifacts.screenshot } : {}),
       ...(page.artifacts.dom ? { dom: page.artifacts.dom } : {}),
@@ -69,7 +67,7 @@ const CLIENT_JS = String.raw`
   var pageByUrl = {};
   data.pages.forEach(function (page) { pageByUrl[page.url] = page; });
 
-  var state = { query: '', selected: null };
+  var state = { query: '', selected: null, highlight: -1 };
 
   function el(tag, className, text) {
     var node = document.createElement(tag);
@@ -94,12 +92,9 @@ const CLIENT_JS = String.raw`
     );
   }
 
-  function issueLabel(issue) {
-    return issue.impact.toUpperCase() + ' · ' + issue.ruleId;
-  }
-
   function renderSummary() {
     var summary = document.getElementById('summary-chips');
+    summary.textContent = '';
     var chips = [
       ['Pages', data.stats.pages],
       ['Audited', data.stats.audited],
@@ -166,6 +161,7 @@ const CLIENT_JS = String.raw`
         var button = el('button', 'tree-page', '/ (home)');
         button.type = 'button';
         button.appendChild(scoreBadge(page));
+        if (state.selected === page.url) button.classList.add('selected');
         button.addEventListener('click', function () { select(page.url); });
         var item = el('li');
         item.appendChild(button);
@@ -187,8 +183,7 @@ const CLIENT_JS = String.raw`
   }
 
   function scoreBadge(page) {
-    var badge = el('span', 'badge ' + scoreClass(page.score), page.score === null ? '–' : page.score);
-    return badge;
+    return el('span', 'badge ' + scoreClass(page.score), page.score === null ? '–' : page.score);
   }
 
   function renderGraph() {
@@ -269,10 +264,7 @@ const CLIENT_JS = String.raw`
 
       group.addEventListener('click', function () { select(node.id); });
       group.addEventListener('keydown', function (event) {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          select(node.id);
-        }
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(node.id); }
       });
 
       if (state.selected === node.id) group.classList.add('selected');
@@ -287,14 +279,84 @@ const CLIENT_JS = String.raw`
 
   function select(url) {
     state.selected = url;
+    state.highlight = -1;
     renderTree();
     renderGraph();
     renderDetails();
   }
 
+  function impactColor(impact) {
+    if (impact === 'critical') return '#b42318';
+    if (impact === 'serious') return '#d92d20';
+    if (impact === 'moderate') return '#b54708';
+    return '#667085';
+  }
+
+  function renderScreenshot(page) {
+    if (!page.screenshot) return null;
+    var wrap = el('div', 'screenshot-wrap');
+    wrap.appendChild(el('h3', null, 'Screenshot & highlights'));
+
+    var stage = el('div', 'screenshot-stage');
+    var img = document.createElement('img');
+    img.src = page.screenshot;
+    img.alt = 'Full-page screenshot of ' + page.url;
+    img.loading = 'lazy';
+    stage.appendChild(img);
+
+    var overlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    overlay.setAttribute('class', 'highlight-overlay');
+    overlay.setAttribute('aria-hidden', 'true');
+    stage.appendChild(overlay);
+    wrap.appendChild(stage);
+
+    var legend = el('p', 'muted small', 'Highlight boxes show elements with recorded positions. Some findings (cross-frame, dynamic) may not have a box.');
+    wrap.appendChild(legend);
+
+    function draw() {
+      overlay.textContent = '';
+      if (!img.naturalWidth) return;
+      overlay.setAttribute('viewBox', '0 0 ' + img.naturalWidth + ' ' + img.naturalHeight);
+      overlay.style.width = img.clientWidth + 'px';
+      overlay.style.height = img.clientHeight + 'px';
+
+      var idx = 0;
+      page.issues.forEach(function (issue, issueIndex) {
+        (issue.nodes || []).forEach(function (node, nodeIndex) {
+          if (!node.rect) return;
+          var r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          r.setAttribute('x', String(node.rect.x));
+          r.setAttribute('y', String(node.rect.y));
+          r.setAttribute('width', String(Math.max(2, node.rect.width)));
+          r.setAttribute('height', String(Math.max(2, node.rect.height)));
+          r.setAttribute('fill', impactColor(issue.impact));
+          r.setAttribute('fill-opacity', state.highlight === idx ? '0.28' : '0.12');
+          r.setAttribute('stroke', impactColor(issue.impact));
+          r.setAttribute('stroke-width', state.highlight === idx ? '4' : '2');
+          r.setAttribute('data-hi', String(idx));
+          r.style.cursor = 'pointer';
+          r.addEventListener('click', function () {
+            state.highlight = Number(r.getAttribute('data-hi'));
+            draw();
+            var target = document.querySelector('[data-issue-index="' + issueIndex + '"]');
+            if (target) { target.open = true; target.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+          });
+          overlay.appendChild(r);
+          idx += 1;
+        });
+      });
+    }
+
+    img.addEventListener('load', draw);
+    if (img.complete) draw();
+    window.addEventListener('resize', draw);
+    return wrap;
+  }
+
   function renderDetails() {
     var panel = document.getElementById('details');
     panel.textContent = '';
+    state.highlight = -1;
 
     if (!state.selected) {
       panel.appendChild(el('p', 'muted', 'Select a page in the tree or graph.'));
@@ -316,26 +378,34 @@ const CLIENT_JS = String.raw`
     var meta = el('div', 'meta');
     meta.appendChild(el('span', null, 'Status ' + (page.status === null ? 'unknown' : page.status)));
     meta.appendChild(el('span', null, 'Depth ' + page.depth));
-    meta.appendChild(el('span', null, page.audited ? 'Score ' + page.score + '/100' : 'Not audited'));
-    meta.appendChild(el('span', null, page.issueCount + ' findings'));
+    if (page.scores) {
+      meta.appendChild(el('span', 'score-chip ' + scoreClass(page.scores.ada), 'ADA ' + page.scores.ada));
+      meta.appendChild(el('span', 'score-chip ' + scoreClass(page.scores.keyboard), 'Keyboard ' + page.scores.keyboard));
+      meta.appendChild(el('span', 'score-chip ' + scoreClass(page.scores.overall), 'Overall ' + page.scores.overall));
+    } else {
+      meta.appendChild(el('span', null, page.audited ? 'Score ' + page.score + '/100' : 'Not audited'));
+    }
+    if (page.issueCounts) {
+      meta.appendChild(el('span', null, page.issueCounts.critical + ' critical'));
+      meta.appendChild(el('span', null, page.issueCounts.serious + ' serious'));
+    }
     panel.appendChild(meta);
 
     var actions = el('div', 'actions');
     var open = el('a', 'button', 'Open page');
-    open.href = page.url;
-    open.target = '_blank';
-    open.rel = 'noreferrer noopener';
+    open.href = page.url; open.target = '_blank'; open.rel = 'noreferrer noopener';
     actions.appendChild(open);
-
-    if (graphNode) {
-      var focus = el('button', 'button', 'Show in graph');
-      focus.type = 'button';
-      focus.addEventListener('click', function () {
-        document.getElementById('graph').scrollIntoView({ behavior: 'smooth', block: 'center' });
-        select(page.url);
-      });
-      actions.appendChild(focus);
+    if (page.dom) {
+      var dom = el('a', 'button', 'Saved DOM');
+      dom.href = page.dom; dom.target = '_blank'; dom.rel = 'noreferrer noopener';
+      actions.appendChild(dom);
     }
+    var focus = el('button', 'button', 'Show in graph');
+    focus.type = 'button';
+    focus.addEventListener('click', function () {
+      document.getElementById('graph').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    actions.appendChild(focus);
     panel.appendChild(actions);
 
     if (!page.audited) {
@@ -343,41 +413,61 @@ const CLIENT_JS = String.raw`
       return;
     }
 
+    var shot = renderScreenshot(page);
+    if (shot) panel.appendChild(shot);
+
     if (!page.issues.length) {
       panel.appendChild(el('p', 'clean', 'No automated findings on this page.'));
       return;
     }
 
-    var heading = el('h3', null, 'Findings');
-    panel.appendChild(heading);
+    panel.appendChild(el('h3', null, 'Findings (' + page.issues.length + ')'));
 
-    page.issues.forEach(function (issue) {
-      var details = el('details', 'issue ' + 'impact-' + issue.impact);
+    page.issues.forEach(function (issue, issueIndex) {
+      var details = el('details', 'issue impact-' + issue.impact);
+      details.setAttribute('data-issue-index', String(issueIndex));
       var summary = el('summary');
       summary.appendChild(el('span', 'impact', issue.impact));
+      summary.appendChild(el('span', 'source', issue.source));
       summary.appendChild(el('span', 'rule', issue.ruleId));
       details.appendChild(summary);
+
       details.appendChild(el('p', null, issue.description));
       details.appendChild(el('p', 'help', issue.help));
 
+      if (issue.tags && issue.tags.length) {
+        var tags = el('div', 'tags');
+        issue.tags.slice(0, 8).forEach(function (tag) { tags.appendChild(el('span', 'tag', tag)); });
+        details.appendChild(tags);
+      }
+
       if (issue.helpUrl) {
-        var link = el('a', null, 'WCAG guidance');
-        link.href = issue.helpUrl;
-        link.target = '_blank';
-        link.rel = 'noreferrer noopener';
+        var link = el('a', null, 'Guidance');
+        link.href = issue.helpUrl; link.target = '_blank'; link.rel = 'noreferrer noopener';
         details.appendChild(link);
       }
 
-      var selectors = [];
-      issue.nodes.forEach(function (node) {
-        if (node.target && node.target.length) selectors.push(node.target.join(' '));
+      (issue.nodes || []).slice(0, 12).forEach(function (node) {
+        var card = el('div', 'node-card');
+        if (node.target && node.target.length) {
+          card.appendChild(el('code', 'selector', node.target.join(' ')));
+        }
+        if (node.rect) {
+          card.appendChild(el('span', 'rect-info', ' @ ' + node.rect.x + ',' + node.rect.y + ' ' + node.rect.width + '×' + node.rect.height));
+        }
+        if (node.failureSummary) {
+          card.appendChild(el('p', 'failure', node.failureSummary));
+        }
+        if (node.html) {
+          var pre = el('pre', 'node-html');
+          pre.textContent = String(node.html).slice(0, 400);
+          card.appendChild(pre);
+        }
+        details.appendChild(card);
       });
-      if (selectors.length) {
-        var list = el('ul', 'selectors');
-        selectors.slice(0, 12).forEach(function (selector) {
-          list.appendChild(el('li', null, selector));
-        });
-        details.appendChild(list);
+
+      if ((issue.nodes || []).length > 12) {
+        details.appendChild(el('p', 'muted small', '… and ' + (issue.nodes.length - 12) + ' more node(s)'));
       }
 
       panel.appendChild(details);
@@ -387,6 +477,7 @@ const CLIENT_JS = String.raw`
   function renderNotices() {
     if (!data.notices.length) return;
     var host = document.getElementById('notices');
+    host.textContent = '';
     data.notices.forEach(function (message) { host.appendChild(el('p', null, message)); });
   }
 
@@ -406,6 +497,15 @@ const CLIENT_JS = String.raw`
 })();
 `;
 
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ??
+      character,
+  );
+}
+
 export function renderViewer(manifest: CrawlManifest): string {
   const data = toViewerData(manifest);
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
@@ -420,122 +520,37 @@ export function renderViewer(manifest: CrawlManifest): string {
 <style>
   :root {
     color-scheme: light;
-    --bg: #f7f8fa;
-    --panel: #ffffff;
-    --ink: #101828;
-    --muted: #667085;
-    --line: #d0d5dd;
-    --accent: #1a56db;
-    --good: #067647;
-    --warn: #b54708;
-    --bad: #b42318;
-    --focus: #1a56db;
+    --bg: #f7f8fa; --panel: #fff; --ink: #101828; --muted: #667085;
+    --line: #d0d5dd; --accent: #1a56db; --good: #067647; --warn: #b54708; --bad: #b42318; --focus: #1a56db;
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-  }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
   a { color: var(--accent); }
   :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-  header {
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
-    padding: 1rem 1.5rem;
-    position: sticky;
-    top: 0;
-    z-index: 5;
-  }
+  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 1rem 1.5rem; position: sticky; top: 0; z-index: 5; }
   header h1 { margin: 0 0 0.25rem; font-size: 1.15rem; }
   header p { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
   .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
-  .chip {
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 0.15rem 0.7rem;
-    background: var(--bg);
-    font-size: 0.85rem;
-  }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 0.15rem 0.7rem; background: var(--bg); font-size: 0.85rem; }
   .chip strong { font-variant-numeric: tabular-nums; }
-  .bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    align-items: center;
-    padding: 0.75rem 1.5rem;
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
-  }
+  .bar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; padding: 0.75rem 1.5rem; background: var(--panel); border-bottom: 1px solid var(--line); }
   .bar label { font-weight: 600; }
-  .bar input {
-    min-width: 16rem;
-    padding: 0.45rem 0.6rem;
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    font: inherit;
-  }
+  .bar input { min-width: 16rem; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: 7px; font: inherit; }
   .bar span { color: var(--muted); font-size: 0.85rem; }
-  #layout {
-    display: grid;
-    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr) minmax(280px, 360px);
-    gap: 1rem;
-    padding: 1rem 1.5rem 2rem;
-    align-items: start;
-  }
-  @media (max-width: 1100px) {
-    #layout { grid-template-columns: 1fr; }
-  }
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 0.9rem 1rem;
-    max-height: calc(100vh - 13rem);
-    overflow: auto;
-  }
+  #layout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr) minmax(320px, 420px); gap: 1rem; padding: 1rem 1.5rem 2rem; align-items: start; }
+  @media (max-width: 1100px) { #layout { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 0.9rem 1rem; max-height: calc(100vh - 13rem); overflow: auto; }
   .panel h2 { margin: 0 0 0.35rem; font-size: 1.05rem; overflow-wrap: anywhere; }
   .panel h3 { margin: 1rem 0 0.5rem; font-size: 0.95rem; }
   .url { color: var(--muted); font-size: 0.8rem; overflow-wrap: anywhere; margin: 0 0 0.75rem; }
   ul { list-style: none; margin: 0; padding-left: 0.9rem; }
   #tree > ul { padding-left: 0; }
-  .tree-group > summary {
-    cursor: pointer;
-    padding: 0.15rem 0.25rem;
-    border-radius: 5px;
-    font-weight: 600;
-    color: var(--muted);
-  }
+  .tree-group > summary { cursor: pointer; padding: 0.15rem 0.25rem; border-radius: 5px; font-weight: 600; color: var(--muted); }
   .tree-group > summary:hover { background: var(--bg); }
-  .tree-page {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    width: 100%;
-    text-align: left;
-    border: 0;
-    background: none;
-    padding: 0.2rem 0.25rem;
-    border-radius: 5px;
-    color: var(--ink);
-    font: inherit;
-    cursor: pointer;
-    overflow-wrap: anywhere;
-  }
+  .tree-page { display: flex; gap: 0.5rem; align-items: center; width: 100%; text-align: left; border: 0; background: none; padding: 0.2rem 0.25rem; border-radius: 5px; color: var(--ink); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
   .tree-page:hover { background: var(--bg); }
   .tree-page.selected { background: #e8efff; color: #0b3a9c; }
-  .badge {
-    flex: none;
-    min-width: 2rem;
-    text-align: center;
-    border-radius: 999px;
-    padding: 0 0.35rem;
-    font-size: 0.75rem;
-    font-weight: 700;
-    background: var(--bg);
-    color: var(--muted);
-  }
+  .badge { flex: none; min-width: 2rem; text-align: center; border-radius: 999px; padding: 0 0.35rem; font-size: 0.75rem; font-weight: 700; background: var(--bg); color: var(--muted); }
   .score-good { color: var(--good); }
   .score-warn { color: var(--warn); }
   .score-bad { color: var(--bad); }
@@ -550,37 +565,24 @@ export function renderViewer(manifest: CrawlManifest): string {
   #graph-wrap { overflow: auto; }
   #graph { display: block; min-width: 100%; }
   .muted { color: var(--muted); }
+  .small { font-size: 0.8rem; }
   .clean { color: var(--good); font-weight: 600; }
   .meta { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.25rem 0 0.75rem; }
-  .meta span {
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 0.1rem 0.55rem;
-    font-size: 0.78rem;
-  }
-  .actions { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
-  .button {
-    display: inline-block;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    color: var(--ink);
-    border-radius: 7px;
-    padding: 0.35rem 0.65rem;
-    font: inherit;
-    font-size: 0.85rem;
-    text-decoration: none;
-    cursor: pointer;
-  }
+  .meta span, .score-chip { background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 0.1rem 0.55rem; font-size: 0.78rem; }
+  .score-chip.score-good { border-color: #abefc6; background: #ecfdf3; }
+  .score-chip.score-warn { border-color: #fedf89; background: #fffaeb; }
+  .score-chip.score-bad { border-color: #fecdca; background: #fef3f2; }
+  .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+  .button { display: inline-block; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px; padding: 0.35rem 0.65rem; font: inherit; font-size: 0.85rem; text-decoration: none; cursor: pointer; }
   .button:hover { background: var(--bg); }
+  .screenshot-wrap { margin: 0.75rem 0 1rem; }
+  .screenshot-stage { position: relative; display: inline-block; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+  .screenshot-stage img { display: block; max-width: 100%; height: auto; }
+  .highlight-overlay { position: absolute; left: 0; top: 0; pointer-events: all; }
   .issue { border-top: 1px solid var(--line); padding: 0.45rem 0; }
-  .issue summary { cursor: pointer; display: flex; gap: 0.5rem; align-items: baseline; }
-  .issue .impact {
-    text-transform: uppercase;
-    font-size: 0.66rem;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-  }
+  .issue summary { cursor: pointer; display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; }
+  .issue .impact { text-transform: uppercase; font-size: 0.66rem; font-weight: 700; letter-spacing: 0.03em; }
+  .issue .source { font-size: 0.66rem; color: var(--muted); text-transform: uppercase; }
   .impact-critical .impact { color: #912018; }
   .impact-serious .impact { color: #b42318; }
   .impact-moderate .impact { color: #b54708; }
@@ -588,10 +590,14 @@ export function renderViewer(manifest: CrawlManifest): string {
   .issue .rule { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
   .issue p { margin: 0.35rem 0; font-size: 0.85rem; }
   .issue .help { color: var(--muted); }
-  .selectors { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
-  .selectors li { padding: 0.1rem 0; overflow-wrap: anywhere; }
-  .notices { margin: 0 1.5rem; }
-  .notices p { background: #fff8e5; border: 1px solid #f5c76b; border-radius: 7px; padding: 0.5rem 0.75rem; }
+  .tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.35rem 0; }
+  .tag { font-size: 0.72rem; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 0.35rem; }
+  .node-card { margin: 0.4rem 0; padding: 0.45rem 0.55rem; background: var(--bg); border-radius: 6px; font-size: 0.82rem; }
+  .selector { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; overflow-wrap: anywhere; }
+  .rect-info { color: var(--muted); font-size: 0.72rem; }
+  .failure { white-space: pre-wrap; margin: 0.25rem 0; }
+  .node-html { margin: 0.25rem 0 0; padding: 0.35rem; background: #fff; border: 1px solid var(--line); border-radius: 4px; font-size: 0.72rem; overflow: auto; max-height: 8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .notices p { margin: 0.5rem 1.5rem; background: #fff8e5; border: 1px solid #f5c76b; border-radius: 7px; padding: 0.5rem 0.75rem; }
 </style>
 </head>
 <body>

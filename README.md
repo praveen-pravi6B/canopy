@@ -30,7 +30,14 @@ No source code from the target is read. No cloud service. No telemetry.
 - crawl authenticated same-origin pages and stop with exit code `3` if the session expires
 - discover links inside open and nested shadow roots during rendered audits
 
-A richer detail UI, per-node ignore rules, and live simulation are the next milestones. See [PLANNER.md](./PLANNER.md).
+**M3 — audit profiles, highlights, and richer detail is in place.** The CLI can also:
+
+- choose axe profiles (`--profile ada|wcag22aa|best-practice`) and toggle best-practice rules
+- control the keyboard probe depth with `--max-tabs`
+- capture per-node bounding boxes and render screenshot highlights in `viewer.html`
+- inspect richer findings: rule source/tags, node HTML snippets, selectors, positions, and ADA/keyboard/overall scores
+
+Per-node ignore rules and live simulation are the next milestones. See [PLANNER.md](./PLANNER.md).
 
 ## Requirements
 
@@ -111,8 +118,8 @@ Authentication (scan/crawl):
 --auth-login-url <url>    # login URL used to detect an expired session
 ```
 
-`scan` and `crawl` share browser, timeout, viewport, output, auth, and
-`--fail-on` flags where applicable.
+`scan` and `crawl` share browser, timeout, viewport, output, auth, audit
+profile/best-practices/max-tabs, and `--fail-on` flags where applicable.
 
 Exit codes: `0` clean, `1` issues at or above `--fail-on`, `2` runtime error, `3` auth expired, `4` cancelled.
 

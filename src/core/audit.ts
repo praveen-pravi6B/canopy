@@ -5,7 +5,7 @@ import type { CanopyConfig } from './config.js';
 import { keyboardFindingsToIssues, probeKeyboard } from './keyboard.js';
 import { overallScore, scoreIssues } from './score.js';
 import { relativeArtifact, writeJson, writeText } from './storage.js';
-import type { PageScanResult } from './types.js';
+import type { Issue, IssueRect, PageScanResult } from './types.js';
 
 export interface AuditPageOptions {
   page: Page;
@@ -70,6 +70,7 @@ export async function auditLoadedPage(options: AuditPageOptions): Promise<PageSc
 
   options.onEvent?.('Running axe-core');
   const axe = await runAxe(page, config);
+  await annotateIssueRects(page, axe.issues);
   const axePath = join(artifactDir, 'axe.json');
   await writeJson(axePath, axe.raw);
   artifacts.axe = relativeArtifact(runDir, axePath);
@@ -81,6 +82,7 @@ export async function auditLoadedPage(options: AuditPageOptions): Promise<PageSc
   artifacts.keyboard = relativeArtifact(runDir, keyboardPath);
 
   const keyboardIssues = keyboardFindingsToIssues(keyboard);
+  await annotateIssueRects(page, keyboardIssues);
   const issues = [...axe.issues, ...keyboardIssues];
   const adaScore = scoreIssues(axe.issues);
   const keyboardScore = scoreIssues(keyboardIssues);
@@ -103,4 +105,58 @@ export async function auditLoadedPage(options: AuditPageOptions): Promise<PageSc
       durationMs: finishedMs - startedMs,
     },
   };
+}
+
+async function annotateIssueRects(page: Page, issues: Issue[]): Promise<void> {
+  const selectors: Array<{ issue: number; node: number; selector: string }> = [];
+
+  issues.forEach((issue, issueIndex) => {
+    issue.nodes.forEach((node, nodeIndex) => {
+      const selector = node.target[0];
+      if (selector) selectors.push({ issue: issueIndex, node: nodeIndex, selector });
+    });
+  });
+
+  if (selectors.length === 0) return;
+
+  // Cap to avoid huge evaluate payloads on noisy pages.
+  const batch = selectors.slice(0, 300);
+
+  let rects: Array<IssueRect | null>;
+  try {
+    rects = await page.evaluate((inputs) => {
+      const toRect = (el: Element): { x: number; y: number; width: number; height: number } | null => {
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 && r.height <= 0) return null;
+        return {
+          x: Math.round(r.left + window.scrollX),
+          y: Math.round(r.top + window.scrollY),
+          width: Math.round(r.width),
+          height: Math.round(r.height),
+        };
+      };
+
+      return inputs.map((input) => {
+        try {
+          // Axe selectors can target shadow DOM via nested arrays; we only
+          // handle simple top-level selectors here (best-effort).
+          if (input.selector.includes(' >> ') || input.selector.startsWith('/')) return null;
+          const el = document.querySelector(input.selector);
+          return el ? toRect(el) : null;
+        } catch {
+          return null;
+        }
+      });
+    }, batch.map((item) => ({ selector: item.selector })));
+  } catch {
+    return;
+  }
+
+  batch.forEach((item, index) => {
+    const rect = rects[index];
+    if (rect) {
+      const node = issues[item.issue]?.nodes[item.node];
+      if (node) node.rect = rect;
+    }
+  });
 }

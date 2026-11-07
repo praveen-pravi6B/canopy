@@ -1,9 +1,17 @@
 export type Impact = 'minor' | 'moderate' | 'serious' | 'critical';
 
+export interface IssueRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface IssueNode {
   target: string[];
   html: string;
   failureSummary?: string;
+  rect?: IssueRect;
 }
 
 export interface Issue {

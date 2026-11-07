@@ -356,7 +356,16 @@ Roughly 5–6 focused weeks for one developer.
 - 76 tests across 9 files, including scripted-login crawl and shadow-DOM discovery fixtures
 - Verified individually: `pnpm typecheck`, targeted vitest suites, `pnpm build`, `pnpm smoke`, and CLI help for `auth test`/`auth capture`
 
-Next: M3 — richer detail UI, axe profile controls, screenshot highlights, and focused per-page inspection.
+### M3 — done
+
+- Axe profile controls exposed through config and CLI: `--profile ada|wcag22aa|best-practice`, `--best-practices/--no-best-practices`
+- Keyboard probe depth controllable with `--max-tabs` (scan/crawl)
+- Per-issue node bounding boxes captured after audits (best-effort, document-relative) and stored with findings
+- `viewer.html` shows per-page ADA/keyboard/overall scores, screenshot with highlight overlays, and richer finding detail (source, WCAG tags, guidance, selectors, positions, failure summaries, node HTML snippets)
+- 83 tests across 11 files (added axe tag/profile and viewer rendering regressions)
+- Verified: `pnpm typecheck`, `pnpm vitest run test/axe.test.ts test/viewer.test.ts` and fast suites, `pnpm build`
+
+Next: M4 — per-node ignore rules, a local detail API/UI workflow for ignores, and live simulation controls.
 
 ## 15. Prior art and community notes
 
