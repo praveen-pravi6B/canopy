@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.canopy/
+.env
+.env.*
+*.log
+.DS_Store
+playwright-report/
+test-results/
+fixtures/**/screenshots/

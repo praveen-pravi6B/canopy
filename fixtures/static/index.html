@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Canopy Fixture — Intentionally Inaccessible</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem auto;
+        max-width: 46rem;
+        line-height: 1.5;
+      }
+
+      /* Deliberately erase the focus indicator. */
+      :focus {
+        outline: none !important;
+        box-shadow: none !important;
+      }
+
+      .faux-button {
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        background: #eee;
+        border: 1px solid #999;
+        cursor: pointer;
+      }
+
+      .low-contrast {
+        color: #bbb;
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Canopy fixture</h1>
+      <p>
+        This page is intentionally inaccessible so the scanner has known
+        violations to find.
+      </p>
+    </header>
+
+    <nav aria-label="Fixture navigation">
+      <a href="/about.html">About this fixture</a>
+      <a href="/missing-page.html">Broken link</a>
+    </nav>
+
+    <main>
+      <h2>Known problems</h2>
+
+      <p>
+        <!-- Missing alt text: axe rule "image-alt". -->
+        <img src="/pixel.svg" width="24" height="24" />
+        An image without alternative text.
+      </p>
+
+      <p class="low-contrast">
+        This paragraph is deliberately low contrast against the background.
+      </p>
+
+      <form>
+        <p>
+          <!-- Unlabeled input: axe rule "label". -->
+          <input type="text" name="email" placeholder="Email" />
+        </p>
+        <p>
+          <button type="button">A real button</button>
+        </p>
+      </form>
+
+      <p>
+        <!-- Clickable div: unreachable by keyboard. -->
+        <span class="faux-button" onclick="void 0">Pretend button</span>
+      </p>
+
+      <p>
+        <!-- Positive tabindex: overrides natural focus order. -->
+        <a href="#second" tabindex="3">Third stop</a>
+        <a href="#first" tabindex="1">First stop</a>
+      </p>
+
+      <h2 id="first">Target one</h2>
+      <p>Some content.</p>
+      <h2 id="second">Target two</h2>
+      <p>Some more content.</p>
+    </main>
+
+    <footer>
+      <p><a href="/">Back to the start</a></p>
+    </footer>
+  </body>
+</html>
